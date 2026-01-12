@@ -23,8 +23,36 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   int _selectedSectionIndex = 0;
   int _selectedTabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      final provider = context.read<NavigationCubit>().state;
+      context.read<HomeBloc>().add(
+        LoadMoreHomeDataEvent(
+          provider: provider,
+          sectionIndex: _selectedSectionIndex,
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -118,6 +146,10 @@ class _HomePageState extends State<HomePage> {
                                       setState(() {
                                         _selectedSectionIndex = index;
                                       });
+                                      // Reset scroll when switching sections
+                                      if (_scrollController.hasClients) {
+                                        _scrollController.jumpTo(0);
+                                      }
                                     },
                                     child: AnimatedDefaultTextStyle(
                                       duration: const Duration(
@@ -141,11 +173,43 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                         Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: _buildDramaGrid(
-                              sections[_selectedSectionIndex].dramas,
-                            ),
+                          child: Stack(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: _buildDramaGrid(
+                                  sections[_selectedSectionIndex].dramas,
+                                ),
+                              ),
+                              if (state.isLoadingMore)
+                                Positioned(
+                                  bottom: 16,
+                                  left: 0,
+                                  right: 0,
+                                  child: Center(
+                                    child: Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.7,
+                                        ),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                Colors.amber,
+                                              ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       ],
@@ -176,8 +240,9 @@ class _HomePageState extends State<HomePage> {
                   }
 
                   final patch = snapshot.data;
+                  final baseVersion = sl<ShorebirdService>().appVersion;
                   final versionText =
-                      'v1.0.0+4${patch != null ? ' patch $patch' : ''}';
+                      '$baseVersion${patch != null ? ' (Patch $patch)' : ''}';
                   Widget statusWidget = const SizedBox.shrink();
                   Color? bgColor = Colors.black;
 
@@ -266,10 +331,18 @@ class _HomePageState extends State<HomePage> {
                       break;
                   }
 
-                  return Container(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    color: bgColor,
-                    child: SafeArea(top: false, child: statusWidget),
+                  return GestureDetector(
+                    onTap: () {
+                      if (status != ShorebirdUpdateStatus.checking &&
+                          status != ShorebirdUpdateStatus.downloading) {
+                        sl<ShorebirdService>().checkForUpdates();
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      color: bgColor,
+                      child: SafeArea(top: false, child: statusWidget),
+                    ),
                   );
                 },
               );
@@ -317,6 +390,10 @@ class _HomePageState extends State<HomePage> {
                       context.read<HomeBloc>().add(
                         FetchHomeDataEvent(provider: newProvider),
                       );
+                      // Reset scroll when switching providers
+                      if (_scrollController.hasClients) {
+                        _scrollController.jumpTo(0);
+                      }
                     }
                   },
                   items: [
@@ -391,6 +468,7 @@ class _HomePageState extends State<HomePage> {
     bool showChapterCount = true,
   }) {
     return GridView.builder(
+      controller: _scrollController,
       padding: const EdgeInsets.all(16),
       physics: const BouncingScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
