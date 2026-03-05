@@ -161,12 +161,11 @@ class DramaRepositoryImpl implements DramaRepository {
   Future<List<DramaModel>> searchDramas(
     String query, {
     AppContentProvider provider = AppContentProvider.dramabox,
-    int page = 1,
   }) async {
     if (provider == AppContentProvider.dramabox) {
-      return await dramaboxRemoteDataSource.searchDramas(query, page: page);
+      return await dramaboxRemoteDataSource.searchDramas(query);
     } else {
-      return await netshortRemoteDataSource.searchDramas(query, page: page);
+      return await netshortRemoteDataSource.searchDramas(query);
     }
   }
 

@@ -13,6 +13,7 @@ import 'package:dramabox_free/presentation/blocs/history_bloc.dart';
 import 'package:dramabox_free/core/services/shorebird_service.dart';
 import 'package:dramabox_free/core/di/injection_container.dart';
 import 'package:dramabox_free/domain/repositories/drama_repository.dart';
+import 'package:dramabox_free/presentation/widgets/rate_limit_error_widget.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -30,28 +31,13 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
-  }
-
-  void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
-      final provider = context.read<NavigationCubit>().state;
-      context.read<HomeBloc>().add(
-        LoadMoreHomeDataEvent(
-          provider: provider,
-          sectionIndex: _selectedSectionIndex,
-        ),
-      );
-    }
   }
 
   @override
@@ -173,48 +159,25 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                         Expanded(
-                          child: Stack(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: _buildDramaGrid(
-                                  sections[_selectedSectionIndex].dramas,
-                                ),
-                              ),
-                              if (state.isLoadingMore)
-                                Positioned(
-                                  bottom: 16,
-                                  left: 0,
-                                  right: 0,
-                                  child: Center(
-                                    child: Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.7,
-                                        ),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const SizedBox(
-                                        width: 24,
-                                        height: 24,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                Colors.amber,
-                                              ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: _buildDramaGrid(
+                              sections[_selectedSectionIndex].dramas,
+                            ),
                           ),
                         ),
                       ],
                     );
                   } else if (state is HomeError) {
+                    if (state.isApiBlocked) {
+                      return RateLimitErrorWidget(
+                        onRetry: () {
+                          context.read<HomeBloc>().add(
+                            FetchHomeDataEvent(provider: provider),
+                          );
+                        },
+                      );
+                    }
                     return Center(child: Text(state.message));
                   }
                   return const SizedBox();

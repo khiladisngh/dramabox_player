@@ -8,6 +8,7 @@ import 'package:dramabox_free/presentation/widgets/drama_card.dart';
 import 'package:dramabox_free/presentation/pages/player_page.dart';
 import 'package:dramabox_free/core/di/injection_container.dart';
 import 'package:dramabox_free/domain/repositories/drama_repository.dart';
+import 'package:dramabox_free/presentation/widgets/rate_limit_error_widget.dart';
 
 class SearchPage extends StatefulWidget {
   final String query;
@@ -22,7 +23,6 @@ class SearchPage extends StatefulWidget {
 class _SearchPageState extends State<SearchPage> {
   late final HomeBloc _homeBloc;
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -30,24 +30,12 @@ class _SearchPageState extends State<SearchPage> {
     _searchController.text = widget.query;
     _homeBloc = sl<HomeBloc>();
     _homeBloc.add(SearchDramasEvent(widget.query, provider: widget.provider));
-    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
     super.dispose();
-  }
-
-  void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
-      _homeBloc.add(
-        LoadMoreSearchEvent(_searchController.text, provider: widget.provider),
-      );
-    }
   }
 
   @override
@@ -114,37 +102,20 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                 );
               }
-              return Stack(
-                children: [
-                  _buildDramaGrid(dramas),
-                  if (state.isLoadingMore)
-                    Positioned(
-                      bottom: 16,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.7),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.amber,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              );
+              return _buildDramaGrid(dramas);
             } else if (state is HomeError) {
+              if (state.isApiBlocked) {
+                return RateLimitErrorWidget(
+                  onRetry: () {
+                    _homeBloc.add(
+                      SearchDramasEvent(
+                        _searchController.text,
+                        provider: widget.provider,
+                      ),
+                    );
+                  },
+                );
+              }
               return Center(
                 child: Text(
                   state.message,
@@ -161,7 +132,6 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _buildDramaGrid(List<DramaModel> dramas) {
     return GridView.builder(
-      controller: _scrollController,
       padding: const EdgeInsets.all(16),
       physics: const BouncingScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(

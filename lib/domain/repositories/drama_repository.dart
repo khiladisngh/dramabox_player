@@ -35,7 +35,6 @@ abstract class DramaRepository {
   Future<List<DramaModel>> searchDramas(
     String query, {
     AppContentProvider provider = AppContentProvider.dramabox,
-    int page = 1,
   });
   Future<List<EpisodeModel>> getDramaEpisodes(
     String bookId, {

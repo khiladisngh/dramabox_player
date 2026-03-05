@@ -8,7 +8,7 @@ abstract class DramaRemoteDataSource {
   Future<List<DramaModel>> getTrendingDramas({int page = 1});
   Future<List<DramaModel>> getLatestDramas({int page = 1});
   Future<List<DramaModel>> getVipDramas({int page = 1});
-  Future<List<DramaModel>> searchDramas(String query, {int page = 1});
+  Future<List<DramaModel>> searchDramas(String query);
   Future<List<EpisodeModel>> getDramaEpisodes(String bookId);
 }
 
@@ -67,10 +67,10 @@ class DramaRemoteDataSourceImpl implements DramaRemoteDataSource {
   }
 
   @override
-  Future<List<DramaModel>> searchDramas(String query, {int page = 1}) async {
+  Future<List<DramaModel>> searchDramas(String query) async {
     final response = await client.dio.get(
       '/dramabox/search',
-      queryParameters: {'query': query, 'page': page},
+      queryParameters: {'query': query},
     );
     final data = response.data;
     if (data is List) {

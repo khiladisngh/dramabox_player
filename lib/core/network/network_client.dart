@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:dramabox_free/core/network/rate_limit_interceptor.dart';
 
 class NetworkClient {
   final Dio dio;
@@ -11,5 +12,7 @@ class NetworkClient {
           receiveTimeout: const Duration(seconds: 60),
           headers: {'accept': 'application/json'},
         ),
-      );
+      ) {
+    dio.interceptors.add(RateLimitInterceptor());
+  }
 }
