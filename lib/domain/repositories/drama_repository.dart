@@ -59,4 +59,5 @@ abstract class DramaRepository {
   Future<int> getLocalLastWatchedIndex(String bookId);
   Future<void> saveHistory(HistoryModel history);
   Future<List<HistoryModel>> getHistory();
+  Future<String> decryptVideoUrl(String url);
 }

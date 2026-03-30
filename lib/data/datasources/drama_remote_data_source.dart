@@ -10,6 +10,7 @@ abstract class DramaRemoteDataSource {
   Future<List<DramaModel>> getVipDramas({int page = 1});
   Future<List<DramaModel>> searchDramas(String query);
   Future<List<EpisodeModel>> getDramaEpisodes(String bookId);
+  Future<String> decryptVideoUrl(String url);
 }
 
 class DramaRemoteDataSourceImpl implements DramaRemoteDataSource {
@@ -94,5 +95,30 @@ class DramaRemoteDataSourceImpl implements DramaRemoteDataSource {
       return decoded.map((e) => EpisodeModel.fromJson(e)).toList();
     }
     return [];
+  }
+
+  @override
+  Future<String> decryptVideoUrl(String url) async {
+    // If it's already a decrypted stream URL, no need to decrypt again
+    if (url.contains('api.sansekai.my.id/api/dramabox/decrypt-stream')) {
+      return url;
+    }
+
+    final response = await client.dio.get(
+      '/dramabox/decrypt',
+      queryParameters: {'url': url},
+    );
+    final data = response.data;
+    if (data is Map && data['success'] == true) {
+      return data['streamUrl'] as String;
+    }
+    
+    // If direct string is returned and it's a valid URL, use it
+    if (data is String && data.startsWith('http')) {
+      return data;
+    }
+    
+    // Return empty string to indicate failure
+    return '';
   }
 }

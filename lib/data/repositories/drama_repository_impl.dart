@@ -260,4 +260,9 @@ class DramaRepositoryImpl implements DramaRepository {
   Future<List<HistoryModel>> getHistory() async {
     return localDataSource.getHistory();
   }
+
+  @override
+  Future<String> decryptVideoUrl(String url) async {
+    return await dramaboxRemoteDataSource.decryptVideoUrl(url);
+  }
 }

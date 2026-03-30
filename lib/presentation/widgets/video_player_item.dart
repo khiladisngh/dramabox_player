@@ -14,6 +14,7 @@ import 'package:dramabox_free/core/services/video_proxy_service.dart';
 import 'package:dramabox_free/core/di/injection_container.dart' as di;
 import 'package:dramabox_free/presentation/cubits/video_control_cubit.dart';
 import 'package:dramabox_free/core/constants/app_enums.dart';
+import 'package:dramabox_free/domain/repositories/drama_repository.dart';
 import 'video_gesture_overlay.dart';
 
 class VideoPlayerItem extends StatefulWidget {
@@ -110,154 +111,64 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
     }
   }
 
-  SubtitleModel _getDefaultSubtitle() {
-    // Prioritize Indonesia (ID) first
-    return widget.episode.subtitles.firstWhere(
-      (s) => s.language.toLowerCase().contains('id'),
-      orElse: () => widget.episode.subtitles.firstWhere(
-        (s) => s.language.toLowerCase().contains('en'),
-        orElse: () => widget.episode.subtitles.first,
-      ),
-    );
-  }
-
-  Future<void> _loadSubtitles(String url) async {
-    try {
-      final response = await Dio().get(url);
-      if (response.data is String) {
-        final vttContent = response.data as String;
-        _parseVTT(vttContent);
+  void _initializeController() async {
+    if (_isInitializing) return;
+    if (widget.episode.videoUrl.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _errorMessage = "Video URL is empty";
+        });
       }
-    } catch (e) {
-      debugPrint("Error loading subtitles: $e");
+      return;
     }
-  }
 
-  void _parseVTT(String content) {
+    if (mounted) {
+      setState(() {
+        _isInitializing = true;
+        _hasError = false;
+        _errorMessage = '';
+      });
+    }
+
     try {
-      final lines = content.split('\n');
-      final List<Caption> captions = [];
+      String videoUrl = widget.episode.videoUrl;
 
-      for (int i = 0; i < lines.length; i++) {
-        final line = lines[i].trim();
-        if (line.contains('-->')) {
-          final times = line.split('-->');
-          if (times.length == 2) {
-            final startTimePart = times[0].trim();
-            final endTimeLine = times[1].trim();
-            final endTimePart = endTimeLine.split(' ')[0];
-
-            final start = _parseVTTTime(startTimePart);
-            final end = _parseVTTTime(endTimePart);
-
-            // Text can be on multiple lines until an empty line
-            String text = '';
-            i++;
-            while (i < lines.length && lines[i].trim().isNotEmpty) {
-              if (text.isNotEmpty) text += '\n';
-              text += lines[i].trim();
-              i++;
-            }
-
-            if (text.isNotEmpty) {
-              captions.add(
-                Caption(
-                  number: captions.length,
-                  start: start,
-                  end: end,
-                  text: text,
-                ),
+      // Handle Dramabox decryption
+      if (widget.provider == AppContentProvider.dramabox) {
+        // Only decrypt if it's not already a decrypted stream URL
+        if (!videoUrl.contains('api.sansekai.my.id')) {
+          try {
+            final decrypted = await di.sl<DramaRepository>().decryptVideoUrl(
+              videoUrl,
+            );
+            if (decrypted.isNotEmpty && decrypted.startsWith('http')) {
+              videoUrl = decrypted;
+            } else {
+              throw Exception(
+                "Valid stream URL not received from decryption API",
               );
             }
+          } catch (e) {
+            debugPrint("Error decrypting video url: $e");
+            if (mounted) {
+              setState(() {
+                _hasError = true;
+                _errorMessage = 'Video decryption failed. Please try again.';
+                _isInitializing = false;
+              });
+            }
+            return;
           }
         }
       }
 
-      if (mounted) {
-        setState(() {
-          _captions = captions;
-        });
-      }
-    } catch (e) {
-      debugPrint("Error parsing VTT: $e");
-    }
-  }
+      // Proxy URLs
+      videoUrl = di.sl<VideoProxyService>().getProxyUrl(videoUrl);
 
-  Duration _parseVTTTime(String time) {
-    // Format: 00:00:00.000 or 00:00.000
-    final parts = time.split(':');
-    if (parts.length == 3) {
-      final hours = int.parse(parts[0]);
-      final minutes = int.parse(parts[1]);
-      final secondsParts = parts[2].split('.');
-      final seconds = int.parse(secondsParts[0]);
-      final milliseconds = int.parse(secondsParts[1].padRight(3, '0'));
-      return Duration(
-        hours: hours,
-        minutes: minutes,
-        seconds: seconds,
-        milliseconds: milliseconds,
-      );
-    } else if (parts.length == 2) {
-      final minutes = int.parse(parts[0]);
-      final secondsParts = parts[1].split('.');
-      final seconds = int.parse(secondsParts[0]);
-      final milliseconds = int.parse(secondsParts[1].padRight(3, '0'));
-      return Duration(
-        minutes: minutes,
-        seconds: seconds,
-        milliseconds: milliseconds,
-      );
-    }
-    return Duration.zero;
-  }
-
-  void _updateCurrentCaption(Duration position) {
-    if (_captions.isEmpty || !_subtitlesEnabled) {
-      if (_currentCaption.isNotEmpty) {
-        setState(() => _currentCaption = '');
-      }
-      return;
-    }
-
-    final caption = _captions.firstWhere(
-      (c) => position >= c.start && position <= c.end,
-      orElse: () => const Caption(
-        number: -1,
-        start: Duration.zero,
-        end: Duration.zero,
-        text: '',
-      ),
-    );
-
-    if (_currentCaption != caption.text) {
-      setState(() {
-        _currentCaption = caption.text;
-      });
-    }
-  }
-
-  void _initializeController() async {
-    if (_isInitializing) return;
-    if (widget.episode.videoUrl.isEmpty) {
-      setState(() {
-        _hasError = true;
-        _errorMessage = "Video URL is empty";
-      });
-      return;
-    }
-
-    setState(() {
-      _isInitializing = true;
-      _hasError = false;
-      _errorMessage = '';
-    });
-
-    try {
-      String videoUrl = widget.episode.videoUrl;
-      // Only use proxy for Netshort on Android
-      if (widget.provider == AppContentProvider.netshort) {
-        videoUrl = di.sl<VideoProxyService>().getProxyUrl(videoUrl);
+      // Check if we have a valid URL before proceeding
+      if (videoUrl.isEmpty || !videoUrl.startsWith('http')) {
+        throw Exception("Invalid video URL");
       }
 
       _player = CachedVideoPlayerPlus.networkUrl(
@@ -297,6 +208,155 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
           _isInitializing = false;
         });
       }
+    }
+  }
+
+  SubtitleModel _getDefaultSubtitle() {
+    // Prioritize Indonesia (ID/IN) first
+    final List<String> idTags = ['in', 'id', 'indonesian', 'bahasa'];
+    return widget.episode.subtitles.firstWhere(
+      (s) => idTags.any((tag) => s.language.toLowerCase().contains(tag)),
+      orElse: () => widget.episode.subtitles.firstWhere(
+        (s) => s.language.toLowerCase().contains('en'),
+        orElse: () => widget.episode.subtitles.first,
+      ),
+    );
+  }
+
+  Future<void> _loadSubtitles(String url) async {
+    try {
+      final response = await Dio().get(url);
+      if (response.data is String) {
+        final content = response.data as String;
+        // The parser is now robust enough to handle VTT or SRT
+        _parseSubtitles(content);
+      }
+    } catch (e) {
+      debugPrint("Error loading subtitles: $e");
+    }
+  }
+
+  void _parseSubtitles(String content) {
+    try {
+      final lines = content.split('\n');
+      final List<Caption> captions = [];
+
+      for (int i = 0; i < lines.length; i++) {
+        final line = lines[i].trim();
+        if (line.contains('-->')) {
+          final times = line.split('-->');
+          if (times.length == 2) {
+            final startTimePart = times[0].trim();
+            final endTimeLine = times[1].trim();
+            // Handle possibility of space after time (VTT/SRT variance)
+            final endTimePart = endTimeLine.split(' ')[0];
+
+            final start = _parseSubtitleTime(startTimePart);
+            final end = _parseSubtitleTime(endTimePart);
+
+            // Fetch the text following the time code
+            String text = '';
+            i++;
+            while (i < lines.length && lines[i].trim().isNotEmpty) {
+              // Skip numeric lines if it looks like an SRT index
+              if (i + 1 < lines.length && lines[i + 1].contains('-->')) {
+                // It was just the index, text is still empty or belongs to previous. Break.
+                break;
+              }
+
+              if (text.isNotEmpty) text += '\n';
+              text += lines[i].trim().replaceAll(
+                RegExp(r'<[^>]*>'),
+                '',
+              ); // Basic HTML tag strip
+              i++;
+            }
+
+            if (text.isNotEmpty && start != Duration.zero) {
+              captions.add(
+                Caption(
+                  number: captions.length,
+                  start: start,
+                  end: end,
+                  text: text,
+                ),
+              );
+            }
+          }
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _captions = captions;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error parsing subtitles: $e");
+    }
+  }
+
+  Duration _parseSubtitleTime(String time) {
+    // Robustly handle VTT (00:00:00.000) and SRT (00:00:00,000)
+    final timeClean = time.replaceAll(',', '.');
+    final parts = timeClean.split(':');
+
+    try {
+      if (parts.length == 3) {
+        final hours = int.parse(parts[0]);
+        final minutes = int.parse(parts[1]);
+        final secondsParts = parts[2].split('.');
+        final seconds = int.parse(secondsParts[0]);
+        final milliseconds = int.parse(
+          secondsParts[1].padRight(3, '0').substring(0, 3),
+        );
+        return Duration(
+          hours: hours,
+          minutes: minutes,
+          seconds: seconds,
+          milliseconds: milliseconds,
+        );
+      } else if (parts.length == 2) {
+        final minutes = int.parse(parts[0]);
+        final secondsParts = parts[1].split('.');
+        final seconds = int.parse(secondsParts[0]);
+        final milliseconds = int.parse(
+          secondsParts[1].padRight(3, '0').substring(0, 3),
+        );
+        return Duration(
+          minutes: minutes,
+          seconds: seconds,
+          milliseconds: milliseconds,
+        );
+      }
+    } catch (e) {
+      debugPrint("Error parsing time part [$time]: $e");
+    }
+    return Duration.zero;
+  }
+
+  void _updateCurrentCaption(Duration position) {
+    if (_captions.isEmpty || !_subtitlesEnabled) {
+      if (_currentCaption.isNotEmpty) {
+        setState(() => _currentCaption = '');
+      }
+      return;
+    }
+
+    final caption = _captions.firstWhere(
+      (c) => position >= c.start && position <= c.end,
+      orElse: () => const Caption(
+        number: -1,
+        start: Duration.zero,
+        end: Duration.zero,
+        text: '',
+      ),
+    );
+
+    if (_currentCaption != caption.text) {
+      setState(() {
+        _currentCaption = caption.text;
+      });
     }
   }
 

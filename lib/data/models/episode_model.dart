@@ -14,8 +14,11 @@ class SubtitleModel extends Equatable {
   factory SubtitleModel.fromJson(Map<String, dynamic> json) {
     return SubtitleModel(
       url: json['url'] ?? '',
-      format: json['format'] ?? '',
-      language: json['subtitleLanguage'] ?? json['language'] ?? '',
+      format: json['url']?.toString().endsWith('.srt') == true ? 'srt' : 'vtt',
+      language: json['subtitleLanguage'] ??
+          json['language'] ??
+          json['captionLanguage'] ??
+          '',
     );
   }
 
@@ -47,6 +50,19 @@ class EpisodeModel extends Equatable {
     if (json['subtitles'] != null) {
       final list = json['subtitles'] as List;
       subtitles.addAll(list.map((e) => SubtitleModel.fromJson(e)));
+    }
+
+    // Support Dramabox-specific structure: subLanguageVoList
+    if (json['subLanguageVoList'] != null) {
+      final list = json['subLanguageVoList'] as List;
+      for (var e in list) {
+        if (e is Map<String, dynamic> &&
+            e['url'] != null &&
+            e['url'].toString().isNotEmpty &&
+            e['captionLanguage'] != 'none') {
+          subtitles.add(SubtitleModel.fromJson(e));
+        }
+      }
     }
 
     // Check if it's already a parsed model from cache
