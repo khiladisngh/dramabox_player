@@ -15,6 +15,10 @@ abstract class DramaRepository {
     AppContentProvider provider = AppContentProvider.dramabox,
     int page = 1,
   });
+  Future<List<DramaModel>> getForYouDramas({
+    AppContentProvider provider = AppContentProvider.dramabox,
+    int page = 1,
+  });
   Future<List<DramaModel>> getLatestDramas({
     AppContentProvider provider = AppContentProvider.dramabox,
     int page = 1,

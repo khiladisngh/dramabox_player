@@ -28,17 +28,66 @@ class _HomePageState extends State<HomePage> {
   int _selectedSectionIndex = 0;
   int _selectedTabIndex = 0;
 
+  bool _isPaginationInProgress = false;
+
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
+
+  void _onScroll() {
+    if (_isPaginationInProgress) return;
+
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      final provider = context.read<NavigationCubit>().state;
+      final state = context.read<HomeBloc>().state;
+      
+      if (state is HomeLoaded) {
+        final sections = provider == AppContentProvider.dramabox
+            ? state.sectionsForDramabox
+            : state.sectionsForNetshort;
+            
+        if (_selectedSectionIndex >= sections.length) return;
+        
+        final section = sections[_selectedSectionIndex];
+        
+        // Only For You supports pagination for Dramabox
+        if (provider == AppContentProvider.dramabox && 
+            section.name != 'For You') {
+           return;
+        }
+
+        if (section.hasMore) {
+          setState(() => _isPaginationInProgress = true);
+          context.read<HomeBloc>().add(
+            LoadMoreHomeDataEvent(
+              provider: provider,
+              sectionIndex: _selectedSectionIndex,
+            ),
+          );
+          
+          // Reset loading flag after a short delay
+          // In a real app, this should be handled by BLoC state changes
+          Future.delayed(const Duration(seconds: 1), () {
+            if (mounted) {
+              setState(() => _isPaginationInProgress = false);
+            }
+          });
+        }
+      }
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -440,8 +489,18 @@ class _HomePageState extends State<HomePage> {
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),
-      itemCount: dramas.length,
+      itemCount: dramas.length + (_isPaginationInProgress ? 1 : 0),
       itemBuilder: (context, index) {
+        if (index == dramas.length) {
+          return const Center(
+            child: SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+
         final drama = dramas[index];
         final provider = context.read<NavigationCubit>().state;
         return DramaCard(

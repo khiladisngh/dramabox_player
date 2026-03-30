@@ -5,9 +5,10 @@ import 'package:dramabox_free/data/models/drama_model.dart';
 import 'package:dramabox_free/data/models/episode_model.dart';
 
 abstract class DramaRemoteDataSource {
-  Future<List<DramaModel>> getTrendingDramas({int page = 1});
-  Future<List<DramaModel>> getLatestDramas({int page = 1});
-  Future<List<DramaModel>> getVipDramas({int page = 1});
+  Future<List<DramaModel>> getTrendingDramas();
+  Future<List<DramaModel>> getLatestDramas();
+  Future<List<DramaModel>> getForYouDramas({int page = 1});
+  Future<List<DramaModel>> getVipDramas();
   Future<List<DramaModel>> searchDramas(String query);
   Future<List<EpisodeModel>> getDramaEpisodes(String bookId);
   Future<String> decryptVideoUrl(String url);
@@ -19,9 +20,19 @@ class DramaRemoteDataSourceImpl implements DramaRemoteDataSource {
   DramaRemoteDataSourceImpl({required this.client});
 
   @override
-  Future<List<DramaModel>> getTrendingDramas({int page = 1}) async {
+  Future<List<DramaModel>> getTrendingDramas() async {
+    final response = await client.dio.get('/dramabox/trending');
+    final data = response.data;
+    if (data is List) {
+      return data.map((e) => DramaModel.fromJson(e)).toList();
+    }
+    return [];
+  }
+
+  @override
+  Future<List<DramaModel>> getForYouDramas({int page = 1}) async {
     final response = await client.dio.get(
-      '/dramabox/trending',
+      '/dramabox/foryou',
       queryParameters: {'page': page},
     );
     final data = response.data;
@@ -32,11 +43,8 @@ class DramaRemoteDataSourceImpl implements DramaRemoteDataSource {
   }
 
   @override
-  Future<List<DramaModel>> getLatestDramas({int page = 1}) async {
-    final response = await client.dio.get(
-      '/dramabox/latest',
-      queryParameters: {'page': page},
-    );
+  Future<List<DramaModel>> getLatestDramas() async {
+    final response = await client.dio.get('/dramabox/latest');
     final data = response.data;
     if (data is List) {
       return data.map((e) => DramaModel.fromJson(e)).toList();
@@ -45,11 +53,8 @@ class DramaRemoteDataSourceImpl implements DramaRemoteDataSource {
   }
 
   @override
-  Future<List<DramaModel>> getVipDramas({int page = 1}) async {
-    final response = await client.dio.get(
-      '/dramabox/vip',
-      queryParameters: {'page': page},
-    );
+  Future<List<DramaModel>> getVipDramas() async {
+    final response = await client.dio.get('/dramabox/vip');
     final data = response.data;
     final List<DramaModel> allDramas = [];
 

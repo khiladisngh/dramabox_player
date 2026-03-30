@@ -28,6 +28,16 @@ class FetchHomeDataEvent extends HomeEvent {
 
 class PreloadAllEvent extends HomeEvent {}
 
+class LoadMoreHomeDataEvent extends HomeEvent {
+  final AppContentProvider provider;
+  final int sectionIndex;
+
+  LoadMoreHomeDataEvent({required this.provider, required this.sectionIndex});
+
+  @override
+  List<Object?> get props => [provider, sectionIndex];
+}
+
 class SearchDramasEvent extends HomeEvent {
   final String query;
   final AppContentProvider provider;
@@ -163,6 +173,64 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
         if (state is! HomeLoaded) {
           emit(_errorFromException(e));
         }
+      }
+    });
+
+    on<LoadMoreHomeDataEvent>((event, emit) async {
+      if (state is! HomeLoaded) return;
+      final currentState = state as HomeLoaded;
+
+      final provider = event.provider;
+      final sectionsMap = Map<AppContentProvider, List<DramaSectionModel>>.from(
+        currentState.providerSections,
+      );
+      final sections = List<DramaSectionModel>.from(
+        sectionsMap[provider] ?? [],
+      );
+
+      if (event.sectionIndex >= sections.length) return;
+
+      final section = sections[event.sectionIndex];
+      // Only For You supports pagination for Dramabox
+      if (provider == AppContentProvider.dramabox &&
+          section.name != 'For You') {
+        return;
+      }
+
+      if (!section.hasMore) return;
+
+      final nextPage = section.currentPage + 1;
+
+      try {
+        final List<DramaModel> moreDramas;
+        if (provider == AppContentProvider.dramabox) {
+          moreDramas = await repository.getForYouDramas(
+            provider: provider,
+            page: nextPage,
+          );
+        } else {
+          // Use Trending as ForYou for Netshort as per current repository mapping
+          moreDramas = await repository.getTrendingDramas(
+            provider: provider,
+            page: nextPage,
+          );
+        }
+
+        if (moreDramas.isEmpty) {
+          sections[event.sectionIndex] = section.copyWith(hasMore: false);
+        } else {
+          sections[event.sectionIndex] = section.copyWith(
+            dramas: [...section.dramas, ...moreDramas],
+            currentPage: nextPage,
+            // Assuming 10+ items means there might be more
+            hasMore: moreDramas.length >= 10,
+          );
+        }
+
+        sectionsMap[provider] = sections;
+        emit(currentState.copyWith(providerSections: sectionsMap));
+      } catch (e) {
+        debugPrint("Error loading more dramas: $e");
       }
     });
 

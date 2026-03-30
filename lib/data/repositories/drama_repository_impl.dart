@@ -35,15 +35,17 @@ class DramaRepositoryImpl implements DramaRepository {
     } else {
       // Dramabox fixed sections
       final results = await Future.wait([
+        dramaboxRemoteDataSource.getForYouDramas(page: 1),
         dramaboxRemoteDataSource.getLatestDramas(),
         dramaboxRemoteDataSource.getTrendingDramas(),
         dramaboxRemoteDataSource.getVipDramas(),
       ]);
 
       final sections = [
-        DramaSectionModel(name: 'Latest', dramas: results[0]),
-        DramaSectionModel(name: 'Trending', dramas: results[1]),
-        DramaSectionModel(name: 'VIP', dramas: results[2]),
+        DramaSectionModel(name: 'For You', dramas: results[0], currentPage: 1),
+        DramaSectionModel(name: 'Latest', dramas: results[1], hasMore: false),
+        DramaSectionModel(name: 'Trending', dramas: results[2], hasMore: false),
+        DramaSectionModel(name: 'VIP', dramas: results[3], hasMore: false),
       ];
       await localDataSource.cacheSections(cacheKey, sections);
       return sections;
@@ -65,9 +67,7 @@ class DramaRepositoryImpl implements DramaRepository {
   }) async {
     try {
       if (provider == AppContentProvider.dramabox) {
-        final remoteDramas = await dramaboxRemoteDataSource.getTrendingDramas(
-          page: page,
-        );
+        final remoteDramas = await dramaboxRemoteDataSource.getTrendingDramas();
         if (page == 1) {
           await localDataSource.cacheTrendingDramas(remoteDramas);
         }
@@ -85,15 +85,32 @@ class DramaRepositoryImpl implements DramaRepository {
   }
 
   @override
+  Future<List<DramaModel>> getForYouDramas({
+    AppContentProvider provider = AppContentProvider.dramabox,
+    int page = 1,
+  }) async {
+    try {
+      if (provider == AppContentProvider.dramabox) {
+        final remoteDramas = await dramaboxRemoteDataSource.getForYouDramas(
+          page: page,
+        );
+        return remoteDramas;
+      } else {
+        return await netshortRemoteDataSource.getForYouDramas(page: page);
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  @override
   Future<List<DramaModel>> getLatestDramas({
     AppContentProvider provider = AppContentProvider.dramabox,
     int page = 1,
   }) async {
     try {
       if (provider == AppContentProvider.dramabox) {
-        final remoteDramas = await dramaboxRemoteDataSource.getLatestDramas(
-          page: page,
-        );
+        final remoteDramas = await dramaboxRemoteDataSource.getLatestDramas();
         if (page == 1) {
           await localDataSource.cacheLatestDramas(remoteDramas);
         }
@@ -117,9 +134,7 @@ class DramaRepositoryImpl implements DramaRepository {
   }) async {
     try {
       if (provider == AppContentProvider.dramabox) {
-        final remoteDramas = await dramaboxRemoteDataSource.getVipDramas(
-          page: page,
-        );
+        final remoteDramas = await dramaboxRemoteDataSource.getVipDramas();
         if (page == 1) {
           await localDataSource.cacheVipDramas(remoteDramas);
         }
