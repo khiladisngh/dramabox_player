@@ -295,14 +295,98 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
   }
 
   SubtitleModel _getDefaultSubtitle() {
-    // Prioritize Indonesia (ID/IN) first
-    final List<String> idTags = ['in', 'id', 'indonesian', 'bahasa'];
+    final List<String> enTags = ['en', 'english', 'eng', 'us', 'gb'];
     return widget.episode.subtitles.firstWhere(
-      (s) => idTags.any((tag) => s.language.toLowerCase().contains(tag)),
+      (s) => enTags.any((tag) => s.language.toLowerCase().contains(tag)),
       orElse: () => widget.episode.subtitles.firstWhere(
-        (s) => s.language.toLowerCase().contains('en'),
+        (s) => !s.language.toLowerCase().contains('none') && s.url.isNotEmpty,
         orElse: () => widget.episode.subtitles.first,
       ),
+    );
+  }
+
+  void _showSubtitleSelectionSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF181818),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Subtitles',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Switch(
+                        value: _subtitlesEnabled,
+                        activeTrackColor: Colors.amber,
+                        onChanged: (val) {
+                          setState(() {
+                            _subtitlesEnabled = val;
+                          });
+                          setModalState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                  const Divider(color: Colors.white24),
+                  if (_subtitlesEnabled && widget.episode.subtitles.isNotEmpty)
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: widget.episode.subtitles.length,
+                        itemBuilder: (context, idx) {
+                          final sub = widget.episode.subtitles[idx];
+                          final isSelected =
+                              _selectedSubtitle?.language == sub.language;
+                          return ListTile(
+                            title: Text(
+                              sub.language.toUpperCase(),
+                              style: TextStyle(
+                                color: isSelected ? Colors.amber : Colors.white,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: isSelected
+                                ? const Icon(Icons.check, color: Colors.amber)
+                                : null,
+                            onTap: () {
+                              setState(() {
+                                _selectedSubtitle = sub;
+                                _subtitlesEnabled = true;
+                              });
+                              _loadSubtitles(sub.url);
+                              Navigator.pop(context);
+                              _startHideTimer();
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -921,9 +1005,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                             if (widget.episode.subtitles.isNotEmpty)
                               GestureDetector(
                                 onTap: () {
-                                  setState(() {
-                                    _subtitlesEnabled = !_subtitlesEnabled;
-                                  });
+                                  _showSubtitleSelectionSheet();
                                   _startHideTimer();
                                 },
                                 child: Container(
@@ -933,8 +1015,8 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                                   ),
                                   decoration: BoxDecoration(
                                     color: _subtitlesEnabled
-                                        ? Colors.redAccent.withValues(
-                                            alpha: 0.8,
+                                        ? Colors.amber.withValues(
+                                            alpha: 0.9,
                                           )
                                         : Colors.white.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(20),
@@ -954,14 +1036,22 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                                           _subtitlesEnabled
                                               ? Icons.closed_caption
                                               : Icons.closed_caption_disabled,
-                                          color: Colors.white,
+                                          color: _subtitlesEnabled
+                                              ? Colors.black
+                                              : Colors.white,
                                           size: 18,
                                         ),
                                         const SizedBox(width: 4),
-                                        const Text(
-                                          'CC',
+                                        Text(
+                                          _subtitlesEnabled &&
+                                                  _selectedSubtitle != null
+                                              ? _selectedSubtitle!.language
+                                                  .toUpperCase()
+                                              : 'CC',
                                           style: TextStyle(
-                                            color: Colors.white,
+                                            color: _subtitlesEnabled
+                                                ? Colors.black
+                                                : Colors.white,
                                             fontSize: 12,
                                             fontWeight: FontWeight.bold,
                                           ),
