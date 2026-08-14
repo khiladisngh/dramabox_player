@@ -61,8 +61,30 @@ class MyApp extends StatelessWidget {
 class MyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
+    final client = super.createHttpClient(context)
       ..badCertificateCallback =
           (X509Certificate cert, String host, int port) => true;
+
+    client.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
+      final host = proxyHost ?? uri.host;
+      final port = proxyPort ?? uri.port;
+
+      try {
+        return await Socket.startConnect(host, port);
+      } catch (e) {
+        // If DNS fails (e.g. corporate VPN DNS conflict), fall back to Cloudflare edge IPs for Sansekai API
+        if (host.contains('sansekai.my.id')) {
+          const fallbackIps = ['172.67.173.251', '104.21.96.65'];
+          for (final ip in fallbackIps) {
+            try {
+              return await Socket.startConnect(InternetAddress(ip), port);
+            } catch (_) {}
+          }
+        }
+        rethrow;
+      }
+    };
+
+    return client;
   }
 }

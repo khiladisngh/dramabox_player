@@ -30,12 +30,11 @@ class VideoProxyService {
   /// Returns the proxied URL for Android, or the original URL for other platforms.
   /// Returns the proxied URL if the server is available, otherwise returns the original URL.
   String getProxyUrl(String originalUrl) {
-    if (_server == null) {
-      return originalUrl;
+    if (Platform.isAndroid && _server != null) {
+      final encodedUrl = Uri.encodeComponent(originalUrl);
+      return 'http://$_localIp:$_port/?url=$encodedUrl';
     }
-    // Encode the original URL to safely pass it as a query parameter
-    final encodedUrl = Uri.encodeComponent(originalUrl);
-    return 'http://$_localIp:$_port/?url=$encodedUrl';
+    return originalUrl;
   }
 
   /// Handles incoming requests from the video player.
