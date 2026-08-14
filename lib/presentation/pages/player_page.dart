@@ -100,8 +100,8 @@ class _PlayerPageState extends State<PlayerPage> {
           controller: _pageController,
           physics: const PageScrollPhysics(),
           scrollDirection: Axis.vertical,
-          // Preload next 3 episodes
-          cacheExtent: MediaQuery.of(context).size.height * 3,
+          // Only render visible episode to conserve network and avoid 429 rate limit
+          cacheExtent: 0,
           slivers: [
             SliverFillViewport(
               delegate: SliverChildBuilderDelegate((context, index) {

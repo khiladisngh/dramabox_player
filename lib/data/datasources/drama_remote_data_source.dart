@@ -16,6 +16,7 @@ abstract class DramaRemoteDataSource {
 
 class DramaRemoteDataSourceImpl implements DramaRemoteDataSource {
   final NetworkClient client;
+  final Map<String, String> _decryptedCache = {};
 
   DramaRemoteDataSourceImpl({required this.client});
 
@@ -109,21 +110,38 @@ class DramaRemoteDataSourceImpl implements DramaRemoteDataSource {
       return url;
     }
 
-    final response = await client.dio.get(
-      '/dramabox/decrypt',
-      queryParameters: {'url': url},
-    );
-    final data = response.data;
-    if (data is Map && data['success'] == true) {
-      return data['streamUrl'] as String;
+    if (_decryptedCache.containsKey(url)) {
+      return _decryptedCache[url]!;
     }
-    
-    // If direct string is returned and it's a valid URL, use it
-    if (data is String && data.startsWith('http')) {
-      return data;
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        final response = await client.dio.get(
+          '/dramabox/decrypt',
+          queryParameters: {'url': url},
+        );
+        final data = response.data;
+        if (data is Map && data['success'] == true) {
+          final streamUrl = data['streamUrl'] as String;
+          _decryptedCache[url] = streamUrl;
+          return streamUrl;
+        }
+
+        // If direct string is returned and it's a valid URL, use it
+        if (data is String && data.startsWith('http')) {
+          _decryptedCache[url] = data;
+          return data;
+        }
+
+        return '';
+      } catch (e) {
+        if (attempt < 2) {
+          await Future.delayed(Duration(milliseconds: 1000 * (attempt + 1)));
+          continue;
+        }
+        rethrow;
+      }
     }
-    
-    // Return empty string to indicate failure
     return '';
   }
 }

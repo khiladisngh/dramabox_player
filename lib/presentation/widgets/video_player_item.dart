@@ -111,7 +111,9 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
     _videoControlCubit = VideoControlCubit();
     _subtitlesEnabled = widget.initialIsSubtitlesEnabled;
     _selectSubtitle();
-    _initializeController();
+    if (widget.isVisible) {
+      _initializeController();
+    }
     _startHideTimer();
   }
 
@@ -499,6 +501,10 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
       _captions = [];
       _currentCaption = '';
       _selectSubtitle();
+      if (widget.isVisible) {
+        _initializeController();
+      }
+    } else if (widget.isVisible && !_isInitialized && !_isInitializing) {
       _initializeController();
     } else if (_isInitialized && _player != null) {
       if (widget.isVisible) {
