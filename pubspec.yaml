@@ -49,6 +49,9 @@ dependencies:
   shorebird_code_push: ^1.1.2
   bloc_concurrency: ^0.3.0
   package_info_plus: ^9.0.0
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
 
 dev_dependencies:
   flutter_test:

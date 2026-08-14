@@ -1,21 +1,35 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:dramabox_free/data/models/drama_model.dart';
-import 'package:dramabox_free/presentation/widgets/drama_details_sheet.dart';
-import 'package:cached_video_player_plus/cached_video_player_plus.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:dramabox_free/data/models/episode_model.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:dramabox_free/data/models/drama_model.dart';
+import 'package:dramabox_free/presentation/widgets/drama_details_sheet.dart';
+import 'package:dramabox_free/data/models/episode_model.dart';
 import 'package:dramabox_free/core/services/video_proxy_service.dart';
 import 'package:dramabox_free/core/di/injection_container.dart' as di;
 import 'package:dramabox_free/presentation/cubits/video_control_cubit.dart';
 import 'package:dramabox_free/core/constants/app_enums.dart';
 import 'package:dramabox_free/domain/repositories/drama_repository.dart';
 import 'video_gesture_overlay.dart';
+
+class SubtitleCaption {
+  final int number;
+  final Duration start;
+  final Duration end;
+  final String text;
+
+  const SubtitleCaption({
+    required this.number,
+    required this.start,
+    required this.end,
+    required this.text,
+  });
+}
 
 class VideoPlayerItem extends StatefulWidget {
   final EpisodeModel episode;
@@ -65,7 +79,14 @@ class VideoPlayerItem extends StatefulWidget {
 }
 
 class _VideoPlayerItemState extends State<VideoPlayerItem> {
-  CachedVideoPlayerPlus? _player;
+  Player? _player;
+  VideoController? _videoController;
+  final List<StreamSubscription> _subscriptions = [];
+
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  Duration _buffer = Duration.zero;
+  bool _isPlaying = false;
   bool _isInitialized = false;
   bool _isInitializing = false;
   bool _hasError = false;
@@ -78,7 +99,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
 
   // Subtitle state
   SubtitleModel? _selectedSubtitle;
-  List<Caption> _captions = [];
+  List<SubtitleCaption> _captions = [];
   String _currentCaption = '';
   bool _subtitlesEnabled = true;
 
@@ -109,6 +130,71 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
     if (_selectedSubtitle != null) {
       _loadSubtitles(_selectedSubtitle!.url);
     }
+  }
+
+  void _setupPlayerListeners(Player player) {
+    _subscriptions.add(
+      player.stream.position.listen((pos) {
+        if (!mounted) return;
+        setState(() {
+          _position = pos;
+        });
+        _handlePlaybackProgress(pos, _duration);
+      }),
+    );
+
+    _subscriptions.add(
+      player.stream.duration.listen((dur) {
+        if (!mounted) return;
+        setState(() {
+          _duration = dur;
+        });
+      }),
+    );
+
+    _subscriptions.add(
+      player.stream.buffer.listen((buf) {
+        if (!mounted) return;
+        setState(() {
+          _buffer = buf;
+        });
+      }),
+    );
+
+    _subscriptions.add(
+      player.stream.playing.listen((playing) {
+        if (!mounted) return;
+        setState(() {
+          _isPlaying = playing;
+        });
+      }),
+    );
+
+    _subscriptions.add(
+      player.stream.completed.listen((completed) {
+        if (completed && !_finishedTriggered) {
+          _finishedTriggered = true;
+          widget.onFinished?.call();
+          if (widget.isVisible && !_watchedTriggered) {
+            _watchedTriggered = true;
+            widget.onWatched?.call();
+          }
+        }
+      }),
+    );
+
+    _subscriptions.add(
+      player.stream.error.listen((err) {
+        debugPrint("Player error: $err");
+        if (mounted) {
+          setState(() {
+            _hasError = true;
+            _errorMessage = err.toString();
+            _isInitializing = false;
+          });
+        }
+      }),
+    );
   }
 
   void _initializeController() async {
@@ -171,33 +257,28 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
         throw Exception("Invalid video URL");
       }
 
-      _player = CachedVideoPlayerPlus.networkUrl(
-        Uri.parse(videoUrl),
-        invalidateCacheIfOlderThan: const Duration(days: 7),
-      );
+      for (final sub in _subscriptions) {
+        sub.cancel();
+      }
+      _subscriptions.clear();
+      await _player?.dispose();
 
-      final player = _player;
-      if (player == null) return;
+      final player = Player();
+      _player = player;
+      _videoController = VideoController(player);
+      _setupPlayerListeners(player);
 
-      await player.initialize();
-      player.controller.setLooping(false);
-      player.controller.addListener(_videoListener);
+      await player.open(Media(videoUrl), play: widget.isVisible);
+
+      if (widget.initialPosition > 0) {
+        await player.seek(Duration(milliseconds: widget.initialPosition));
+      }
 
       if (mounted) {
         setState(() {
           _isInitialized = true;
           _isInitializing = false;
         });
-
-        if (widget.initialPosition > 0) {
-          _player?.controller.seekTo(
-            Duration(milliseconds: widget.initialPosition),
-          );
-        }
-
-        if (widget.isVisible) {
-          _player?.controller.play();
-        }
       }
     } catch (e) {
       debugPrint("Error initializing video: $e");
@@ -228,7 +309,6 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
       final response = await Dio().get(url);
       if (response.data is String) {
         final content = response.data as String;
-        // The parser is now robust enough to handle VTT or SRT
         _parseSubtitles(content);
       }
     } catch (e) {
@@ -239,7 +319,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
   void _parseSubtitles(String content) {
     try {
       final lines = content.split('\n');
-      final List<Caption> captions = [];
+      final List<SubtitleCaption> captions = [];
 
       for (int i = 0; i < lines.length; i++) {
         final line = lines[i].trim();
@@ -248,19 +328,15 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
           if (times.length == 2) {
             final startTimePart = times[0].trim();
             final endTimeLine = times[1].trim();
-            // Handle possibility of space after time (VTT/SRT variance)
             final endTimePart = endTimeLine.split(' ')[0];
 
             final start = _parseSubtitleTime(startTimePart);
             final end = _parseSubtitleTime(endTimePart);
 
-            // Fetch the text following the time code
             String text = '';
             i++;
             while (i < lines.length && lines[i].trim().isNotEmpty) {
-              // Skip numeric lines if it looks like an SRT index
               if (i + 1 < lines.length && lines[i + 1].contains('-->')) {
-                // It was just the index, text is still empty or belongs to previous. Break.
                 break;
               }
 
@@ -268,13 +344,13 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
               text += lines[i].trim().replaceAll(
                 RegExp(r'<[^>]*>'),
                 '',
-              ); // Basic HTML tag strip
+              );
               i++;
             }
 
             if (text.isNotEmpty && start != Duration.zero) {
               captions.add(
-                Caption(
+                SubtitleCaption(
                   number: captions.length,
                   start: start,
                   end: end,
@@ -297,7 +373,6 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
   }
 
   Duration _parseSubtitleTime(String time) {
-    // Robustly handle VTT (00:00:00.000) and SRT (00:00:00,000)
     final timeClean = time.replaceAll(',', '.');
     final parts = timeClean.split(':');
 
@@ -345,7 +420,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
 
     final caption = _captions.firstWhere(
       (c) => position >= c.start && position <= c.end,
-      orElse: () => const Caption(
+      orElse: () => const SubtitleCaption(
         number: -1,
         start: Duration.zero,
         end: Duration.zero,
@@ -360,14 +435,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
     }
   }
 
-  void _videoListener() {
-    if (!mounted || !_isInitialized || _player == null) return;
-
-    final player = _player;
-    if (player == null) return;
-    final position = player.controller.value.position;
-    final duration = player.controller.value.duration;
-
+  void _handlePlaybackProgress(Duration position, Duration duration) {
     _updateCurrentCaption(position);
 
     if (position >= duration &&
@@ -375,7 +443,6 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
         !_finishedTriggered) {
       _finishedTriggered = true;
       widget.onFinished?.call();
-      // Also ensure watched is triggered if it hasn't been yet (for short episodes)
       if (widget.isVisible && !_watchedTriggered) {
         _watchedTriggered = true;
         widget.onWatched?.call();
@@ -422,17 +489,22 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
       _isInitialized = false;
       _finishedTriggered = false;
       _watchedTriggered = false;
+      for (final sub in _subscriptions) {
+        sub.cancel();
+      }
+      _subscriptions.clear();
       _player?.dispose();
       _player = null;
+      _videoController = null;
       _captions = [];
       _currentCaption = '';
       _selectSubtitle();
       _initializeController();
-    } else if (_isInitialized) {
+    } else if (_isInitialized && _player != null) {
       if (widget.isVisible) {
-        _player?.controller.play();
+        _player?.play();
       } else {
-        _player?.controller.pause();
+        _player?.pause();
       }
     }
   }
@@ -440,23 +512,23 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    for (final sub in _subscriptions) {
+      sub.cancel();
+    }
+    _subscriptions.clear();
     _player?.dispose();
     _videoControlCubit.close();
     super.dispose();
   }
 
   void _seek(bool forward) async {
-    if (!mounted) return;
-    if (!_isInitialized || _player == null) return;
-    final player = _player;
-    if (player == null) return;
-    final currentPosition = player.controller.value.position;
+    if (!mounted || !_isInitialized || _player == null) return;
+    final currentPosition = _position;
     final seekTo = forward
         ? currentPosition + const Duration(seconds: 3)
         : currentPosition - const Duration(seconds: 3);
 
-    await player.controller.seekTo(seekTo);
-    // Clearing seek action is handled by the consumer logic or a timer if needed by UI
+    await _player?.seek(seekTo < Duration.zero ? Duration.zero : seekTo);
   }
 
   String _formatDuration(Duration duration) {
@@ -466,26 +538,110 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
     return "$twoDigitMinutes:$twoDigitSeconds";
   }
 
+  void _seekToPosition(double dx, double width, double durationMs) {
+    if (width <= 0 || durationMs <= 0 || _player == null) return;
+    final fraction = (dx / width).clamp(0.0, 1.0);
+    final targetMs = (fraction * durationMs).round();
+    _player?.seek(Duration(milliseconds: targetMs));
+    _startHideTimer();
+  }
+
+  Widget _buildProgressIndicator() {
+    final double durationMs = _duration.inMilliseconds.toDouble();
+    final double positionMs = _position.inMilliseconds.toDouble().clamp(0.0, durationMs > 0 ? durationMs : 0.0);
+    final double bufferMs = _buffer.inMilliseconds.toDouble().clamp(0.0, durationMs > 0 ? durationMs : 0.0);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final progressFraction = durationMs > 0 ? (positionMs / durationMs).clamp(0.0, 1.0) : 0.0;
+        final bufferFraction = durationMs > 0 ? (bufferMs / durationMs).clamp(0.0, 1.0) : 0.0;
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (details) {
+            _seekToPosition(details.localPosition.dx, width, durationMs);
+          },
+          onHorizontalDragUpdate: (details) {
+            _seekToPosition(details.localPosition.dx, width, durationMs);
+          },
+          onTapDown: (details) {
+            _seekToPosition(details.localPosition.dx, width, durationMs);
+          },
+          child: SizedBox(
+            height: 20,
+            child: Stack(
+              alignment: Alignment.centerLeft,
+              children: [
+                // Background track
+                Container(
+                  height: 4,
+                  width: width,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // Buffer bar
+                Container(
+                  height: 4,
+                  width: width * bufferFraction,
+                  decoration: BoxDecoration(
+                    color: Colors.white38,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // Played bar
+                Container(
+                  height: 4,
+                  width: width * progressFraction,
+                  decoration: BoxDecoration(
+                    color: Colors.amber,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // Thumb
+                Positioned(
+                  left: (width * progressFraction - 6).clamp(0.0, width - 12),
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: const BoxDecoration(
+                      color: Colors.amber,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black45,
+                          blurRadius: 4,
+                          offset: Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocProvider.value(
       value: _videoControlCubit,
       child: BlocConsumer<VideoControlCubit, VideoControlState>(
         listener: (context, state) {
-          // Handle side effects like player control
           if (_isInitialized && _player != null) {
             if (state.isSpeedUp) {
-              _player!.controller.setPlaybackSpeed(1.5);
+              _player!.setRate(1.5);
             } else {
-              _player!.controller.setPlaybackSpeed(1.0);
+              _player!.setRate(1.0);
             }
 
             if (state.seekAction != null) {
               _seek(state.seekAction == 'forward');
-              // Clear the seek action state immediately after processing to prevent loops
-              // Or better, let the UI showing "Seek" be the one relying on state
-              // Actually the Seek side effect (video position) is handled here.
-              // The visual feedback is handled by the builder.
               Future.delayed(const Duration(milliseconds: 500), () {
                 if (mounted) {
                   _videoControlCubit.clearSeek();
@@ -523,18 +679,11 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                   ),
 
                 Center(
-                  child: _isInitialized && _player != null
-                      ? Builder(
-                          builder: (context) {
-                            final player = _player;
-                            if (player == null) {
-                              return const SizedBox();
-                            }
-                            return AspectRatio(
-                              aspectRatio: player.controller.value.aspectRatio,
-                              child: VideoPlayer(player.controller),
-                            );
-                          },
+                  child: _isInitialized && _videoController != null
+                      ? Video(
+                          controller: _videoController!,
+                          controls: NoVideoControls,
+                          fill: Colors.black,
                         )
                       : const SizedBox(),
                 ),
@@ -702,7 +851,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                   opacity: _showUI ? 1.0 : 0.0,
                   duration: const Duration(milliseconds: 300),
                   child: IgnorePointer(
-                    ignoring: !_showUI, // Prevent clicks when hidden
+                    ignoring: !_showUI,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8.0,
@@ -832,7 +981,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                     opacity: _showUI ? 1.0 : 0.0,
                     duration: const Duration(milliseconds: 300),
                     child: IgnorePointer(
-                      ignoring: !_showUI, // Prevent clicks when hidden
+                      ignoring: !_showUI,
                       child: Container(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
@@ -862,15 +1011,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                                     if (_isInitialized && _player != null)
                                       GestureDetector(
                                         onTap: () {
-                                          final controller =
-                                              _player?.controller;
-                                          if (controller == null) return;
-                                          if (controller.value.isPlaying) {
-                                            controller.pause();
-                                          } else {
-                                            controller.play();
-                                          }
-                                          setState(() {});
+                                          _player?.playOrPause();
                                           _startHideTimer();
                                         },
                                         child: Container(
@@ -897,11 +1038,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                                                 sigmaY: 10,
                                               ),
                                               child: Icon(
-                                                _player
-                                                            ?.controller
-                                                            .value
-                                                            .isPlaying ??
-                                                        false
+                                                _isPlaying
                                                     ? Icons.pause_rounded
                                                     : Icons.play_arrow_rounded,
                                                 color: Colors.white,
@@ -913,35 +1050,16 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                                       ),
                                     const SizedBox(width: 12),
                                     if (_isInitialized && _player != null)
-                                      Builder(
-                                        builder: (context) {
-                                          final player = _player;
-                                          if (player == null) {
-                                            return const SizedBox();
-                                          }
-                                          return ValueListenableBuilder(
-                                            valueListenable: player.controller,
-                                            builder:
-                                                (
-                                                  context,
-                                                  VideoPlayerValue value,
-                                                  child,
-                                                ) {
-                                                  return Text(
-                                                    '${_formatDuration(value.position)} / ${_formatDuration(value.duration)}',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 14,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      fontFeatures: [
-                                                        FontFeature.tabularFigures(),
-                                                      ],
-                                                    ),
-                                                  );
-                                                },
-                                          );
-                                        },
+                                      Text(
+                                        '${_formatDuration(_position)} / ${_formatDuration(_duration)}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          fontFeatures: [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
                                       ),
                                     const Spacer(),
                                     GestureDetector(
@@ -1001,27 +1119,11 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                               const SizedBox(height: 12),
 
                               if (_isInitialized && _player != null)
-                                Builder(
-                                  builder: (context) {
-                                    final player = _player;
-                                    if (player == null) {
-                                      return const SizedBox(height: 4);
-                                    }
-                                    return Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16.0,
-                                      ),
-                                      child: VideoProgressIndicator(
-                                        player.controller,
-                                        allowScrubbing: true,
-                                        colors: const VideoProgressColors(
-                                          playedColor: Colors.amber,
-                                          bufferedColor: Colors.grey,
-                                          backgroundColor: Colors.white24,
-                                        ),
-                                      ),
-                                    );
-                                  },
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16.0,
+                                  ),
+                                  child: _buildProgressIndicator(),
                                 )
                               else
                                 const SizedBox(height: 4),

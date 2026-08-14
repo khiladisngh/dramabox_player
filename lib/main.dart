@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:dramabox_free/core/di/injection_container.dart' as di;
 import 'package:dramabox_free/presentation/blocs/home_bloc.dart';
 import 'package:dramabox_free/presentation/blocs/player_bloc.dart';
@@ -14,6 +15,7 @@ import 'package:dramabox_free/presentation/pages/home_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   HttpOverrides.global = MyHttpOverrides();
 
   await Hive.initFlutter();
